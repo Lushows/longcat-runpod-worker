@@ -35,4 +35,4 @@ RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingf
 COPY app/ /app/longcat/app/
 
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
-# trigger build 20260605131500-blackwell
+# trigger build 20260605133800-blackwell-force
