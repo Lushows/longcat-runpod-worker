@@ -12,14 +12,15 @@ RUN apt-get update && \
 RUN git clone https://github.com/meituan-longcat/LongCat-Video.git /app/longcat
 WORKDIR /app/longcat
 
-# PyTorch 2.6 (cu124, Ampere/Ada) + flash-attn + dependencias
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124 && \
-    pip install --no-cache-dir psutil packaging ninja && \
-    pip install --no-cache-dir flash_attn==2.7.4.post1 --no-build-isolation && \
-    pip install --no-cache-dir -r requirements.txt && \
-    (pip install --no-cache-dir -r requirements_avatar.txt || true) && \
-    pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[cli]"
+# PyTorch 2.6 (cu124, Ampere/Ada) — pasos SEPARADOS para aislar errores
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+RUN pip install --no-cache-dir psutil packaging ninja
+# flash_attn PRE-COMPILADO (wheel listo: cp310 + torch2.6 + cu12) -> NO necesita nvcc/compilar
+RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements_avatar.txt || true
+RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[cli]"
 
 # Pesos del modelo (~30GB) desde HuggingFace
 RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar-1.5 --local-dir ./weights/LongCat-Video-Avatar-1.5
