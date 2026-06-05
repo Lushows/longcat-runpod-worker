@@ -29,3 +29,4 @@ RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar-1.5 --local-di
 COPY app/ /app/longcat/app/
 
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
+# trigger build 20260605063003
