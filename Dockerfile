@@ -25,7 +25,7 @@ RUN sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requ
 RUN pip install --no-cache-dir -r requirements.txt
 RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements_avatar.txt; fi
 RUN pip install --no-cache-dir -r requirements_avatar.txt || true
-RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[hf_transfer]"
+RUN pip install --no-cache-dir librosa soundfile pyloudnorm boto3 runpod requests "huggingface_hub[hf_transfer]"
 
 # NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
 # y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
