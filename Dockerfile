@@ -20,13 +20,14 @@ RUN pip install --no-cache-dir psutil packaging ninja
 RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r requirements_avatar.txt || true
-RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[cli]"
+RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[hf_transfer]"
 
-# Pesos del modelo (~30GB) desde HuggingFace
-RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar-1.5 --local-dir ./weights/LongCat-Video-Avatar-1.5
+# NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
+# y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
+# Network Volume montado en /runpod-volume (una sola vez, lo reusan todos los workers).
 
 # Nuestro handler + util de subida a R2
 COPY app/ /app/longcat/app/
 
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
-# trigger build 20260605063003
+# trigger build 20260605123500-volume
