@@ -23,9 +23,16 @@ RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/rele
 # Quitar torch/torchvision/torchaudio/flash-attn de requirements para que NO degraden a 2.6
 RUN sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements_avatar.txt; fi
-RUN pip install --no-cache-dir -r requirements_avatar.txt || true
-RUN pip install --no-cache-dir librosa soundfile pyloudnorm boto3 runpod requests "huggingface_hub[hf_transfer]"
+# requirements_avatar.txt trae 2 lineas TOXICAS que rompen TODO el install (resolver de pip
+# falla entero -> no instala NADA -> faltaban audio-separator, pyloudnorm, onnx, etc. una por una):
+#   - libsndfile1==0.0.1     -> NO existe en PyPI (es lib de sistema, ya viene por apt)
+#   - tritonserverclient==0.0.6 -> NO existe en PyPI (404)
+# Las quitamos junto con torch/flash (que pinean 2.6) y dejamos instalar el resto COMPLETO.
+# SIN '|| true': si algo falla, que reviente el BUILD (no en runtime perdiendo tiempo).
+RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn|libsndfile1|tritonserverclient)([=<>! ]|$)/d' requirements_avatar.txt; fi
+RUN pip install --no-cache-dir -r requirements_avatar.txt
+# Deps propias del worker (no van en los requirements de LongCat)
+RUN pip install --no-cache-dir boto3 runpod requests "huggingface_hub[hf_transfer]"
 
 # NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
 # y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
