@@ -3,6 +3,8 @@ import sys
 import json
 import time
 import glob
+import shutil
+import traceback
 import subprocess
 
 import runpod
@@ -25,22 +27,40 @@ DEFAULT_PROMPT = ('A news anchor talks to the camera with natural hand gestures 
                   'lively facial expressions, professional studio lighting.')
 
 
+def log(*a):
+    print('[longcat]', *a, flush=True)
+
+
+def disk_free(path):
+    try:
+        p = path if os.path.isdir(path) else os.path.dirname(path) or '/'
+        t, u, f = shutil.disk_usage(p)
+        return f'{f / 1e9:.1f}GB libres de {t / 1e9:.1f}GB en {p}'
+    except Exception as e:
+        return f'? ({e})'
+
+
 def ensure_model():
     """Descarga el modelo (~30GB) UNA sola vez al volumen. Los siguientes workers lo reusan."""
+    log('volume_mounted(/runpod-volume)=', os.path.isdir('/runpod-volume'), '| VOL=', VOL, '| CKPT=', CKPT)
+    log('disco destino:', disk_free(VOL))
     if os.path.exists(_DONE):
+        log('modelo ya presente en el volumen -> sin descarga')
         return CKPT, None
     try:
         from huggingface_hub import snapshot_download
         os.makedirs(CKPT, exist_ok=True)
+        log('descargando modelo de HuggingFace a', CKPT, '(esto tarda varios minutos la 1a vez)...')
         snapshot_download(
             repo_id='meituan-longcat/LongCat-Video-Avatar-1.5',
             local_dir=CKPT,
-            local_dir_use_symlinks=False,
             max_workers=8,
         )
         open(_DONE, 'w').close()
+        log('modelo descargado OK ->', disk_free(VOL))
         return CKPT, None
     except Exception as e:
+        log('ERROR descargando modelo:', repr(e))
         return None, str(e)
 
 
@@ -61,54 +81,65 @@ def newest_mp4(since_ts):
 
 
 def handler(job):
-    ji = job.get('input', {})
-    img_url = ji.get('input_image_url')
-    aud_url = ji.get('input_audio_url')
-    prompt = (ji.get('prompt') or DEFAULT_PROMPT)[:125]
-    if not img_url:
-        return {'error': 'falta input_image_url'}
-    if not aud_url:
-        return {'error': 'falta input_audio_url'}
+    try:
+        ji = job.get('input', {})
+        img_url = ji.get('input_image_url')
+        aud_url = ji.get('input_audio_url')
+        prompt = (ji.get('prompt') or DEFAULT_PROMPT)[:125]
+        log('=== nuevo job === img?', bool(img_url), 'aud?', bool(aud_url))
+        if not img_url:
+            return {'error': 'falta input_image_url'}
+        if not aud_url:
+            return {'error': 'falta input_audio_url'}
 
-    ckpt, e = ensure_model()
-    if e:
-        return {'error': f'no pude descargar el modelo al volumen: {e}'}
+        ckpt, e = ensure_model()
+        if e:
+            return {'error': f'descarga del modelo fallo: {e}'}
 
-    os.makedirs(INDIR, exist_ok=True)
-    os.makedirs(OUTDIR, exist_ok=True)
-    img, e = download_file(img_url, os.path.join(INDIR, 'img.png'))
-    if e:
-        return {'error': f'no pude descargar la imagen: {e}'}
-    aud, e = download_file(aud_url, os.path.join(INDIR, 'aud.wav'))
-    if e:
-        return {'error': f'no pude descargar el audio: {e}'}
+        os.makedirs(INDIR, exist_ok=True)
+        os.makedirs(OUTDIR, exist_ok=True)
+        log('descargando imagen y audio de entrada...')
+        img, e = download_file(img_url, os.path.join(INDIR, 'img.png'))
+        if e:
+            return {'error': f'no pude descargar la imagen: {e}'}
+        aud, e = download_file(aud_url, os.path.join(INDIR, 'aud.wav'))
+        if e:
+            return {'error': f'no pude descargar el audio: {e}'}
 
-    cfg = {'prompt': prompt, 'cond_image': img, 'cond_audio': {'person1': aud}}
-    jpath = os.path.join(INDIR, 'job.json')
-    with open(jpath, 'w') as f:
-        json.dump(cfg, f)
+        cfg = {'prompt': prompt, 'cond_image': img, 'cond_audio': {'person1': aud}}
+        jpath = os.path.join(INDIR, 'job.json')
+        with open(jpath, 'w') as f:
+            json.dump(cfg, f)
 
-    t0 = time.time()
-    cmd = [
-        'torchrun', '--nproc_per_node=1', 'run_demo_avatar_single_audio_to_video.py',
-        '--context_parallel_size=1', f'--checkpoint_dir={ckpt}', '--stage_1=ai2v',
-        f'--input_json={jpath}', f'--output_dir={OUTDIR}',
-        '--use_distill', '--model_type', 'avatar-v1.5', '--use_int8',
-    ]
-    p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
-    if p.returncode != 0:
-        tail = (p.stderr or p.stdout or '')[-1200:]
-        return {'error': 'LongCat falló: ' + tail}
+        t0 = time.time()
+        cmd = [
+            'torchrun', '--nproc_per_node=1', 'run_demo_avatar_single_audio_to_video.py',
+            '--context_parallel_size=1', f'--checkpoint_dir={ckpt}', '--stage_1=ai2v',
+            f'--input_json={jpath}', f'--output_dir={OUTDIR}',
+            '--use_distill', '--model_type', 'avatar-v1.5', '--use_int8',
+        ]
+        log('lanzando generacion:', ' '.join(cmd))
+        # SIN capture_output -> la salida del torchrun se transmite EN VIVO a los logs de RunPod.
+        p = subprocess.run(cmd, cwd=REPO)
+        log('torchrun termino con returncode =', p.returncode)
+        if p.returncode != 0:
+            return {'error': f'LongCat fallo (returncode {p.returncode}). Revisa los logs de RunPod para el detalle.'}
 
-    out = newest_mp4(t0)
-    if not out:
-        return {'error': 'no se encontró el video de salida. ' + (p.stdout or '')[-400:]}
+        out = newest_mp4(t0)
+        if not out:
+            return {'error': 'no se encontro el video de salida (.mp4) tras la generacion'}
+        log('video generado:', out)
 
-    obj = 'longcat-' + str(int(t0)) + '.mp4'
-    url, e = upload_to_s3(out, os.getenv('BUCKET_NAME', 'studio-lipsync'), obj)
-    if e:
-        return {'error': f'subida a R2 falló: {e}'}
-    return {'output_video_url': url, 'seconds': round(time.time() - t0, 1)}
+        obj = 'longcat-' + str(int(t0)) + '.mp4'
+        url, e = upload_to_s3(out, os.getenv('BUCKET_NAME', 'studio-lipsync'), obj)
+        if e:
+            return {'error': f'subida a R2 fallo: {e}'}
+        log('subido a R2:', url)
+        return {'output_video_url': url, 'seconds': round(time.time() - t0, 1)}
+    except Exception as ex:
+        tb = traceback.format_exc()
+        log('EXCEPCION no controlada en handler:\n', tb)
+        return {'error': 'excepcion en el worker: ' + str(ex)}
 
 
 if __name__ == '__main__':
