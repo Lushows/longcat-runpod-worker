@@ -31,8 +31,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # SIN '|| true': si algo falla, que reviente el BUILD (no en runtime perdiendo tiempo).
 RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn|libsndfile1|tritonserverclient)([=<>! ]|$)/d' requirements_avatar.txt; fi
 RUN pip install --no-cache-dir -r requirements_avatar.txt
-# Deps propias del worker (no van en los requirements de LongCat)
-RUN pip install --no-cache-dir boto3 runpod requests "huggingface_hub[hf_transfer]"
+# Deps propias del worker + 3 que el codigo de avatar importa pero NINGUN requirements declara
+# (auditoria del grafo de imports 2026-06-05): regex (pipeline), tqdm (pipeline/audio_process),
+# triton (block_sparse_attention; suele venir con torch 2.7 pero lo verificamos abajo).
+RUN pip install --no-cache-dir boto3 runpod requests regex tqdm "huggingface_hub[hf_transfer]"
+
+# triton lo trae torch 2.7 (pytorch-triton). Si por lo que sea no esta, instalarlo sin romper torch.
+RUN python -c "import triton" || pip install --no-cache-dir triton
+
+# VERIFICACION EN BUILD: importa TODO el set de deps del camino de avatar (ai2v + use_int8 +
+# avatar-v1.5 + use_distill). Si falta UNA, el build REVIENTA aqui (visible en Actions) en vez de
+# fallar en runtime tras 8 min de cold start. Asi, build verde == todas las deps presentes.
+RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa, soundfile, soxr, scipy, sklearn, skimage, transformers, diffusers, einops, loguru, ftfy, imageio, imageio_ffmpeg, onnx, onnxruntime, numpy, PIL, torchvision, flash_attn; print('=== SMOKE IMPORT OK: todas las deps de avatar presentes ===')"
 
 # NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
 # y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
