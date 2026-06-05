@@ -50,11 +50,20 @@ def ensure_model():
     try:
         from huggingface_hub import snapshot_download
         os.makedirs(CKPT, exist_ok=True)
-        log('descargando modelo de HuggingFace a', CKPT, '(esto tarda varios minutos la 1a vez)...')
+        log('descargando SOLO los pesos int8 (~20GB) a', CKPT, '...')
+        # Saltar lo que NO se usa con --use_int8 (ahorra ~30GB): base FP32, formatos whisper
+        # redundantes, videos demo. Asi cabe en disco efimero y baja mucho mas rapido.
         snapshot_download(
             repo_id='meituan-longcat/LongCat-Video-Avatar-1.5',
             local_dir=CKPT,
             max_workers=8,
+            ignore_patterns=[
+                'diffusion_pytorch_model-*',  # base FP32 (29.5GB) -> usamos quantized para int8
+                '*fp32*',                     # formatos whisper fp32 redundantes
+                'flax_model.msgpack',         # whisper flax (5.75GB)
+                '*.mp4',                      # videos demo (9.3GB)
+                'assets/*',                   # logos/demos del repo
+            ],
         )
         open(_DONE, 'w').close()
         log('modelo descargado OK ->', disk_free(VOL))
