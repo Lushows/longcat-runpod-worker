@@ -29,8 +29,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 #   - tritonserverclient==0.0.6 -> NO existe en PyPI (404)
 # Las quitamos junto con torch/flash (que pinean 2.6) y dejamos instalar el resto COMPLETO.
 # SIN '|| true': si algo falla, que reviente el BUILD (no en runtime perdiendo tiempo).
-RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn|libsndfile1|tritonserverclient)([=<>! ]|$)/d' requirements_avatar.txt; fi
+# Tambien quitamos onnxruntime: LongCat pinea ==1.16.3 (2023) cuyo .so tiene marcada bandera
+# de "executable stack" -> ImportError "cannot enable executable stack" al importarlo. onnxruntime
+# >=1.17.0 ya NO trae esa bandera (fix oficial release notes 1.17). Instalamos 1.19.2 abajo.
+RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn|libsndfile1|tritonserverclient|onnxruntime)([=<>! ]|$)/d' requirements_avatar.txt; fi
 RUN pip install --no-cache-dir -r requirements_avatar.txt
+# onnxruntime nuevo (sin executable stack); audio-separator de hecho prefiere >=1.17
+RUN pip install --no-cache-dir onnxruntime==1.19.2
 # Deps propias del worker + 3 que el codigo de avatar importa pero NINGUN requirements declara
 # (auditoria del grafo de imports 2026-06-05): regex (pipeline), tqdm (pipeline/audio_process),
 # triton (block_sparse_attention; suele venir con torch 2.7 pero lo verificamos abajo).
