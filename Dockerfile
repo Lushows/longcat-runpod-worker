@@ -1,5 +1,6 @@
 # LongCat-Video-Avatar 1.5 worker para RunPod serverless.
-# OJO GPU: necesita ~48GB VRAM (A6000/A40 48GB). torch 2.6 cu124 -> Ampere/Ada, NO Blackwell.
+# GPU: BLACKWELL (RTX 5090 32GB / RTX PRO 6000 96GB). torch 2.7 cu128 -> soporta sm_120.
+# El modelo INT8 cabe en 32GB. Se eligio Blackwell por disponibilidad+precio en RunPod 2026.
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -12,13 +13,17 @@ RUN apt-get update && \
 RUN git clone https://github.com/meituan-longcat/LongCat-Video.git /app/longcat
 WORKDIR /app/longcat
 
-# PyTorch 2.6 (cu124, Ampere/Ada) — pasos SEPARADOS para aislar errores
+# PyTorch 2.7 (cu128, Blackwell sm_120) — pasos SEPARADOS para aislar errores
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+RUN pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install --no-cache-dir psutil packaging ninja
-# flash_attn PRE-COMPILADO (wheel listo: cp310 + torch2.6 + cu12) -> NO necesita nvcc/compilar
-RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# flash_attn PRE-COMPILADO (wheel listo: cp310 + torch2.7 + cu12) -> NO necesita nvcc/compilar
+# Si diera "undefined symbol" en runtime, cambiar abiFALSE -> abiTRUE en esta linea.
+RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# Quitar torch/torchvision/torchaudio/flash-attn de requirements para que NO degraden a 2.6
+RUN sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+RUN if [ -f requirements_avatar.txt ]; then sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements_avatar.txt; fi
 RUN pip install --no-cache-dir -r requirements_avatar.txt || true
 RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingface_hub[hf_transfer]"
 
@@ -30,4 +35,4 @@ RUN pip install --no-cache-dir librosa soundfile boto3 runpod requests "huggingf
 COPY app/ /app/longcat/app/
 
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
-# trigger build 20260605123500-volume
+# trigger build 20260605131500-blackwell
