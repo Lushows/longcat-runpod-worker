@@ -117,18 +117,15 @@ def patch_attention_config(ckpt):
 
 
 def newest_mp4(since_ts):
+    # Solo en OUTDIR (que limpiamos por job) y solo lo generado en ESTE job (mtime). Sin fallback a
+    # todo el REPO -> nunca devolvemos por error un video viejo o un demo.
     cands = []
-    for root in (OUTDIR, REPO):
-        for p in glob.glob(root + '/**/*.mp4', recursive=True):
-            try:
-                if os.path.getmtime(p) >= since_ts - 1:
-                    cands.append(p)
-            except Exception:
-                pass
-        if cands:
-            break
-    if not cands:
-        cands = glob.glob(REPO + '/**/*.mp4', recursive=True)
+    for p in glob.glob(OUTDIR + '/**/*.mp4', recursive=True):
+        try:
+            if os.path.getmtime(p) >= since_ts - 1:
+                cands.append(p)
+        except Exception:
+            pass
     return max(cands, key=os.path.getmtime) if cands else None
 
 
@@ -150,15 +147,27 @@ def handler(job):
         # Atencion: usamos flash_attn nativo (torch 2.6 cu124) -> el config.json del modelo
         # ya trae enable_flashattn2=true, no hace falta parchear.
 
-        os.makedirs(INDIR, exist_ok=True)
-        os.makedirs(OUTDIR, exist_ok=True)
-        log('descargando imagen y audio de entrada...')
+        # Worker CALIENTE: limpiar el I/O del job anterior para NO reusar imagen/audio/video viejos.
+        # (Sin esto, los archivos de paths fijos del job previo se quedaban y se reusaban -> salia
+        #  la cara/video viejo en vez del actual.)
+        for d in (INDIR, OUTDIR):
+            shutil.rmtree(d, ignore_errors=True)
+            os.makedirs(d, exist_ok=True)
+        log('descargando imagen y audio de entrada (frescos)...')
         img, e = download_file(img_url, os.path.join(INDIR, 'img.png'))
         if e:
             return {'error': f'no pude descargar la imagen: {e}'}
-        aud, e = download_file(aud_url, os.path.join(INDIR, 'aud.wav'))
+        raw, e = download_file(aud_url, os.path.join(INDIR, 'audio_in'))
         if e:
             return {'error': f'no pude descargar el audio: {e}'}
+        # Normalizar a WAV 16kHz mono: es lo que LongCat/Whisper esperan, Y asi librosa mide bien la
+        # duracion para num_segments (antes el audio venia mp3 nombrado .wav -> librosa fallaba -> 1 seg -> 3s).
+        aud = os.path.join(INDIR, 'aud.wav')
+        ff = subprocess.run(['ffmpeg', '-y', '-i', raw, '-ar', '16000', '-ac', '1', aud],
+                            capture_output=True, text=True)
+        if ff.returncode != 0 or not os.path.exists(aud):
+            return {'error': 'no pude convertir el audio a WAV 16kHz mono: ' + (ff.stderr or '')[-300:]}
+        log('audio normalizado -> WAV 16kHz mono')
 
         cfg = {'prompt': prompt, 'cond_image': img, 'cond_audio': {'person1': aud}}
         jpath = os.path.join(INDIR, 'job.json')

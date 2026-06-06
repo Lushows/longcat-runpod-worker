@@ -4,9 +4,9 @@ import boto3
 from botocore.config import Config
 
 def download_file(url, local_filename):
+    # Siempre descarga FRESCO. (Antes: si el archivo existia lo reusaba -> en un worker caliente
+    # devolvia la imagen/audio del job ANTERIOR. Los inputs de cada job deben ser los actuales.)
     try:
-        if os.path.exists(local_filename):
-            return local_filename, None
         parent = os.path.dirname(local_filename)
         if parent:
             os.makedirs(parent, exist_ok=True)
