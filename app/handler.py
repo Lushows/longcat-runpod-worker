@@ -126,7 +126,8 @@ def handler(job):
         ckpt, e = ensure_model()
         if e:
             return {'error': f'descarga del modelo fallo: {e}'}
-        patch_attention_config(ckpt)  # flash_attn roto en torch 2.7 -> forzar xformers
+        # Atencion: usamos flash_attn nativo (torch 2.6 cu124) -> el config.json del modelo
+        # ya trae enable_flashattn2=true, no hace falta parchear.
 
         os.makedirs(INDIR, exist_ok=True)
         os.makedirs(OUTDIR, exist_ok=True)

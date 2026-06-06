@@ -1,6 +1,9 @@
 # LongCat-Video-Avatar 1.5 worker para RunPod serverless.
-# GPU: BLACKWELL (RTX 5090 32GB / RTX PRO 6000 96GB). torch 2.7 cu128 -> soporta sm_120.
-# El modelo INT8 cabe en 32GB. Se eligio Blackwell por disponibilidad+precio en RunPod 2026.
+# GPU: AMPERE/ADA (A40, A6000 48GB, A100, L40). torch 2.6 cu124 = COMBO NATIVO del repo.
+# Volvimos a 2.6/cu124 porque torch 2.7 ROMPE flash_attn Y xformers (ABI cp310, undefined symbol).
+# Ya NO necesitamos Blackwell: al quitar el Network Volume desaparecio la escasez de Ampere que
+# nos habia empujado a Blackwell. flash_attn 2.7.4.post1 cu12torch2.6 = wheel que SI funciona.
+# OJO: imagen cu124 NO corre en Blackwell (RTX 5090/PRO 6000) -> excluir esas GPUs del endpoint.
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -13,16 +16,13 @@ RUN apt-get update && \
 RUN git clone https://github.com/meituan-longcat/LongCat-Video.git /app/longcat
 WORKDIR /app/longcat
 
-# PyTorch 2.7 (cu128, Blackwell sm_120) — pasos SEPARADOS para aislar errores
+# PyTorch 2.6 (cu124, Ampere/Ada) — COMBO NATIVO del repo. Pasos SEPARADOS para aislar errores.
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 RUN pip install --no-cache-dir psutil packaging ninja
-# ATENCION: NO usamos flash_attn. flash_attn 2.7.4.post1 (lo que pinea LongCat) esta ROTO con
-# torch 2.7.0 -> 'undefined symbol _ZN3c105Error...' por cambio de ABI en torch 2.7 (issues
-# Dao-AILab/flash-attention #1644, #1696; sin wheel funcional). En su lugar usamos XFORMERS, que
-# SI tiene wheel compatible con torch 2.7 cu128 (==0.0.30) y el codigo de LongCat tiene branch
-# xformers para los 3 sitios de atencion. El handler parchea config.json a enable_xformers=true.
-RUN pip install --no-cache-dir --no-deps xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
+# flash_attn PRE-COMPILADO para torch 2.6 cu12 -> el wheel que SI funciona (combo del repo).
+# torch 2.6 NO tiene el cambio de ABI de 2.7, asi que este wheel cxx11abiFALSE carga sin problema.
+RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 # Quitar torch/torchvision/torchaudio/flash-attn de requirements para que NO degraden a 2.6
 RUN sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
@@ -50,7 +50,7 @@ RUN python -c "import triton" || pip install --no-cache-dir triton
 # VERIFICACION EN BUILD: importa TODO el set de deps del camino de avatar (ai2v + use_int8 +
 # avatar-v1.5 + use_distill). Si falta UNA, el build REVIENTA aqui (visible en Actions) en vez de
 # fallar en runtime tras 8 min de cold start. Asi, build verde == todas las deps presentes.
-RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa, soundfile, soxr, scipy, sklearn, skimage, transformers, diffusers, einops, loguru, ftfy, imageio, imageio_ffmpeg, onnx, onnxruntime, numpy, PIL, torchvision; import xformers, xformers.ops; print('=== SMOKE IMPORT OK: todas las deps de avatar presentes (atencion=xformers) ===')"
+RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa, soundfile, soxr, scipy, sklearn, skimage, transformers, diffusers, einops, loguru, ftfy, imageio, imageio_ffmpeg, onnx, onnxruntime, numpy, PIL, torchvision; import flash_attn; from flash_attn import flash_attn_func, flash_attn_varlen_func; print('=== SMOKE IMPORT OK: todas las deps de avatar presentes (atencion=flash_attn, torch 2.6 cu124) ===')"
 
 # NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
 # y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
