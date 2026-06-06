@@ -73,6 +73,28 @@ def ensure_model():
         return None, str(e)
 
 
+def patch_attention_config(ckpt):
+    """LongCat trae config.json con enable_flashattn2=true, pero flash_attn 2.7.4.post1 esta roto
+    con torch 2.7 (ABI). Forzamos enable_xformers=true (xformers SI es compatible con torch 2.7 y
+    el codigo tiene branch xformers para los 3 sitios de atencion). Idempotente: se corre siempre."""
+    for sub in ('base_model_int8', 'base_model'):
+        cfgpath = os.path.join(ckpt, sub, 'config.json')
+        if not os.path.exists(cfgpath):
+            continue
+        try:
+            with open(cfgpath) as f:
+                cfg = json.load(f)
+            cfg['enable_flashattn3'] = False
+            cfg['enable_flashattn2'] = False
+            cfg['enable_xformers'] = True
+            cfg['enable_bsa'] = False
+            with open(cfgpath, 'w') as f:
+                json.dump(cfg, f, indent=2)
+            log('config de atencion -> xformers:', cfgpath)
+        except Exception as e:
+            log('WARN no pude patchear', cfgpath, ':', repr(e))
+
+
 def newest_mp4(since_ts):
     cands = []
     for root in (OUTDIR, REPO):
@@ -104,6 +126,7 @@ def handler(job):
         ckpt, e = ensure_model()
         if e:
             return {'error': f'descarga del modelo fallo: {e}'}
+        patch_attention_config(ckpt)  # flash_attn roto en torch 2.7 -> forzar xformers
 
         os.makedirs(INDIR, exist_ok=True)
         os.makedirs(OUTDIR, exist_ok=True)

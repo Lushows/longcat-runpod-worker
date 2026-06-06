@@ -17,9 +17,12 @@ WORKDIR /app/longcat
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install --no-cache-dir psutil packaging ninja
-# flash_attn PRE-COMPILADO (wheel listo: cp310 + torch2.7 + cu12) -> NO necesita nvcc/compilar
-# Si diera "undefined symbol" en runtime, cambiar abiFALSE -> abiTRUE en esta linea.
-RUN pip install --no-cache-dir https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# ATENCION: NO usamos flash_attn. flash_attn 2.7.4.post1 (lo que pinea LongCat) esta ROTO con
+# torch 2.7.0 -> 'undefined symbol _ZN3c105Error...' por cambio de ABI en torch 2.7 (issues
+# Dao-AILab/flash-attention #1644, #1696; sin wheel funcional). En su lugar usamos XFORMERS, que
+# SI tiene wheel compatible con torch 2.7 cu128 (==0.0.30) y el codigo de LongCat tiene branch
+# xformers para los 3 sitios de atencion. El handler parchea config.json a enable_xformers=true.
+RUN pip install --no-cache-dir --no-deps xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
 # Quitar torch/torchvision/torchaudio/flash-attn de requirements para que NO degraden a 2.6
 RUN sed -i -E '/^(torch|torchvision|torchaudio|flash[-_]attn)([=<>! ]|$)/d' requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
@@ -47,7 +50,7 @@ RUN python -c "import triton" || pip install --no-cache-dir triton
 # VERIFICACION EN BUILD: importa TODO el set de deps del camino de avatar (ai2v + use_int8 +
 # avatar-v1.5 + use_distill). Si falta UNA, el build REVIENTA aqui (visible en Actions) en vez de
 # fallar en runtime tras 8 min de cold start. Asi, build verde == todas las deps presentes.
-RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa, soundfile, soxr, scipy, sklearn, skimage, transformers, diffusers, einops, loguru, ftfy, imageio, imageio_ffmpeg, onnx, onnxruntime, numpy, PIL, torchvision, flash_attn; print('=== SMOKE IMPORT OK: todas las deps de avatar presentes ===')"
+RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa, soundfile, soxr, scipy, sklearn, skimage, transformers, diffusers, einops, loguru, ftfy, imageio, imageio_ffmpeg, onnx, onnxruntime, numpy, PIL, torchvision; import xformers, xformers.ops; print('=== SMOKE IMPORT OK: todas las deps de avatar presentes (atencion=xformers) ===')"
 
 # NOTA: el modelo (~30GB) NO se hornea en la imagen (reventaba el build por tamaño/limite de 30min
 # y daba "input/output error" al escribir la capa gigante). Se descarga en runtime a un
