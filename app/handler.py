@@ -21,6 +21,9 @@ OUTDIR = '/app/longcat/outputs_avatar_single'
 # El modelo vive en el Network Volume (/runpod-volume) si está montado; si no, en disco local.
 VOL = '/runpod-volume' if os.path.isdir('/runpod-volume') else '/app/longcat/weights'
 CKPT = os.path.join(VOL, 'LongCat-Video-Avatar-1.5')
+# El avatar carga tokenizer/text_encoder/vae del modelo BASE LongCat-Video (repo aparte), que
+# DEBE estar como carpeta hermana del checkpoint: checkpoint_dir/../LongCat-Video = VOL/LongCat-Video.
+BASE = os.path.join(VOL, 'LongCat-Video')
 _DONE = os.path.join(CKPT, '.download_complete')
 
 DEFAULT_PROMPT = ('A news anchor talks to the camera with natural hand gestures and '
@@ -65,6 +68,24 @@ def ensure_model():
                 'assets/*',                   # logos/demos del repo
             ],
         )
+        # El avatar comparte tokenizer + text_encoder (UMT5) + vae con el modelo BASE LongCat-Video.
+        # Bajamos SOLO esas 3 carpetas (+ scheduler chico); saltamos el DiT base (~60GB) que NO
+        # usamos (usamos el int8 del avatar) y lora/assets. Va a VOL/LongCat-Video (carpeta hermana).
+        os.makedirs(BASE, exist_ok=True)
+        log('descargando del modelo BASE solo tokenizer/text_encoder/vae a', BASE, '...')
+        snapshot_download(
+            repo_id='meituan-longcat/LongCat-Video',
+            local_dir=BASE,
+            max_workers=8,
+            allow_patterns=[
+                'tokenizer/*',
+                'text_encoder/*',
+                'vae/*',
+                'scheduler/*',
+                '*.json',  # model_index.json y configs de raiz por si acaso
+            ],
+        )
+        log('modelo BASE descargado ->', disk_free(VOL))
         open(_DONE, 'w').close()
         log('modelo descargado OK ->', disk_free(VOL))
         return CKPT, None
