@@ -178,7 +178,10 @@ def handler(job):
         # son 3.72s y cada uno extra suma (93-13)/25 = 3.2s (13 frames de solape). Si num_segments=1
         # el video sale ~3.7s aunque el audio sea mas largo -> hay que calcularlo. El demo guarda el
         # video COMPLETO en video_continue_{N}.mp4 (acumula sin duplicar solape y recorta el audio),
-        # y newest_mp4 lo agarra. Tope de 16 (~54s) para no pasar el execution timeout.
+        # y newest_mp4 lo agarra.
+        # TOPE configurable (LIPSYNC_MAX_SEGMENTS). 35 segmentos = ~1:52 de video. OJO: mas segmentos =
+        # MUCHO mas render y costo de GPU -> asegurar el Execution Timeout del endpoint alto (>=1200s).
+        MAX_SEG = int(os.getenv('LIPSYNC_MAX_SEGMENTS', '35'))
         n_seg = 1
         try:
             import math as _math
@@ -186,8 +189,8 @@ def handler(job):
             y, _sr = librosa.load(aud, sr=16000)
             dur = len(y) / 16000.0
             n_seg = max(1, _math.ceil((dur - 93 / 25.0) / ((93 - 13) / 25.0)) + 1)
-            n_seg = min(n_seg, 16)
-            log(f'audio dur={dur:.1f}s -> num_segments={n_seg} (~{3.72 + (n_seg-1)*3.2:.1f}s de video)')
+            n_seg = min(n_seg, MAX_SEG)
+            log(f'audio dur={dur:.1f}s -> num_segments={n_seg} (~{3.72 + (n_seg-1)*3.2:.1f}s de video, tope {MAX_SEG})')
         except Exception as ex:
             log('no pude medir el audio, num_segments=1:', repr(ex))
 
