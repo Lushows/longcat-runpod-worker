@@ -58,6 +58,7 @@ RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa,
 
 # Nuestro handler + util de subida a R2
 COPY app/ /app/longcat/app/
+RUN python /app/longcat/app/patch_a40.py
 
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
 # trigger build 20260605133800-blackwell-force
