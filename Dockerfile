@@ -60,5 +60,8 @@ RUN python -c "import triton, regex, tqdm, audio_separator, pyloudnorm, librosa,
 COPY app/ /app/longcat/app/
 RUN python /app/longcat/app/patch_a40.py
 
+# FIX VRAM: recupera memoria fragmentada de la GPU (el error 306MB con 2.89GB reservados-sin-usar en 48GB).
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 CMD ["python", "-u", "/app/longcat/app/handler.py"]
 # trigger build 20260605133800-blackwell-force
